@@ -41,6 +41,23 @@ except ImportError:
     def csrf_exempt(func):
         return func
 
+# TastypieImmediateHttpResponse = ImmediateHttpResponse
+
+# class ImmediateHttpResponse(TastypieImmediateHttpResponse):
+#     def __init__(self, response):
+#         if isinstance(response, http.HttpUnauthorized):
+#             raise ValueError,"UNAUTHORIZED"
+#         elif isinstance(response, http.HttpMethodNotAllowed):
+#             #raise ValueError,"METHOD NOT ALLOWED"
+#             pass
+#         super(ImmediateHttpResponse, self).__init__(response)
+
+
+import sys
+def log(msg):
+    sys.stderr.write(msg)
+    sys.stderr.flush()
+
 
 class NOT_AVAILABLE:
     def __str__(self):
@@ -414,6 +431,7 @@ class Resource(object):
 
         Relies on ``Resource.dispatch`` for the heavy-lifting.
         """
+        request.request_type = 'list'
         return self.dispatch('list', request, **kwargs)
 
     def dispatch_detail(self, request, **kwargs):
@@ -423,6 +441,7 @@ class Resource(object):
 
         Relies on ``Resource.dispatch`` for the heavy-lifting.
         """
+        request.request_type = 'detail'
         return self.dispatch('detail', request, **kwargs)
 
     def dispatch(self, request_type, request, **kwargs):
@@ -526,6 +545,21 @@ class Resource(object):
 
         if not auth_result is True:
             raise ImmediateHttpResponse(response=http.HttpUnauthorized())
+
+
+    def is_authorized_object(self, request, object):
+
+        name = "%s_object" % (request.method.lower())
+        auth_func = getattr(self._meta.authorization, name)
+        auth_result = auth_func(request, object)
+
+        if isinstance(auth_result, HttpResponse):
+            raise ImmediateHttpResponse(response=auth_result)
+
+        if not auth_result is True:
+            raise ImmediateHttpResponse(response=http.HttpUnauthorized())
+
+
 
     def is_authenticated(self, request):
         """
@@ -1119,6 +1153,7 @@ class Resource(object):
         """
         try:
             obj = self.cached_obj_get(request=request, **self.remove_api_resource_names(kwargs))
+            self.is_authorized_object(request, obj)
         except ObjectDoesNotExist:
             return http.HttpNotFound()
         except MultipleObjectsReturned:
@@ -1879,6 +1914,7 @@ class ModelResource(Resource):
             setattr(bundle.obj, key, value)
         bundle = self.full_hydrate(bundle)
         self.is_valid(bundle,request)
+        self.is_authorized_object(request, bundle.obj)
 
         if bundle.errors:
             self.error_response(bundle.errors, request)
@@ -1927,6 +1963,7 @@ class ModelResource(Resource):
 
         bundle = self.full_hydrate(bundle)
         self.is_valid(bundle,request)
+        self.is_authorized_object(request, bundle.obj)
 
         if bundle.errors and not skip_errors:
             self.error_response(bundle.errors, request)
@@ -1970,6 +2007,7 @@ class ModelResource(Resource):
         if not hasattr(obj, 'delete'):
             try:
                 obj = self.obj_get(request, **kwargs)
+                self.is_authorized_object(request, obj) # topher515
             except ObjectDoesNotExist:
                 raise NotFound("A model instance matching the provided arguments could not be found.")
 
